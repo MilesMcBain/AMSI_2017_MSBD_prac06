@@ -1,0 +1,134 @@
+---
+title: "Recommender Systems"
+author: "Miles McBain"
+date: "24 January 2017"
+output: html_document
+---
+
+#Prerequisites
+```{r}
+#install.packages("recommenderlab")
+```
+
+```{r, message=FALSE}
+library(recommenderlab)
+library(dplyr)
+library(knitr)
+```
+
+#Introduction
+This practical is distilled from the excellent documentation for the `recommenderlab` package. It would be well worthwhile reading the [vignette](https://cran.r-project.org/web/packages/recommenderlab/vignettes/recommenderlab.pdf) (39 pages) for an oview of recommender systems in general.
+
+#Load Data
+The data set for this example is an extract of the `jester` dataset which looks at collaborative filtering of jokes. The extract is contained with the `recommenderlab` package.
+
+The data is a matrix that relates users to jokes via ratings. Users are rows and jokes are columns. Ratings are continuous, ranging from -10 to +10:
+```{r}
+data("Jester5k")
+kable(as(Jester5k, "matrix")[1:10,1:10])
+```
+
+**Discuss:**
+
+* How realistic is this rating system?
+   - What strengths does it have over other common systems? For example 0-5 stars?
+
+
+The matrix is of a special type `realRatingMatrix` which is recommenderlab's native format. Reading data from a .csv would require converstion to this format using `as(data, "realRatingMatrix")`.
+
+#Data Processing for Recommender Systems
+
+##Normalisation
+Normalisation addresses the isssue of individual user bias. Different users may have a different baseline response to humour or may have different scales. 
+
+For example, comparing 2 random users:
+```{r}
+usr_list <- as(Jester5k, "list")
+hist(usr_list[[123]],breaks = 50)
+hist(usr_list[[456]],breaks = 50)
+```
+
+
+To account account for this we convert user's ratings to Z-scores. You could do this in base R, but `recommenderlab` has provided a convenience function:
+
+```{r}
+jester5k_norm <- normalize(Jester5k)
+```
+
+Notice how we are told the data has been normalised in the printed description(!).
+
+**Discuss:**
+
+* Where are situations where this type of normalisation may breakdown?
+    -How would we address these? Hint: KNN?
+
+#Creating Training and Test sets
+In recommenderlab the programming model is to create a validation scheme object that wraps the data. Below we define a k=5 fold Cross Validation scheme.
+```{r}
+validation_splits <- evaluationScheme(data = jester5k_norm, 
+                                      method = "cross-validation",
+                                      train = 0.8,
+                                      k = 5,
+                                      goodRating = 5, #!Values >= this define of a successful recommendation. 
+                                      given = 3)
+validation_splits
+```
+
+**Discuss:**
+
+* Understanding the parameters here is important. Look at `help(evaluationScheme)` and consider:
+    - What would be the effect of recommendation accuracy by pushing goodRating up or down?
+    - Is it fair to compare classifiers with different `goodRating`?
+    - What for with less than `given` recommendations how can we make recommendations?
+
+#Generating recommendations
+Here we examine two approaches to recommendations using the User-Based Collaborative Filtering approach (UBCF). We recommend users highly rated things from users with similar recommendation patterns.
+
+## Predicting Ratings
+The first approach is to predict ratings with a veiw to minimising the error. 
+
+```{r, message = FALSE}
+ratings_results <- evaluate(validation_splits, method="UBCF", type = "ratings")
+
+#look at resutls for cross validation folds
+avg(ratings_results)
+
+
+```
+
+**Discuss:** 
+* Look at page 10 of the [recommenderlab vignette](https://cran.r-project.org/web/packages/recommenderlab/vignettes/recommenderlab.pdf) for a definition of the performance measures.
+* Do you think a model with this level of error useful in making joke recommendations? 
+
+## Predicting Top-N Lists
+In this approach we want to provice the Top-N most likely recommendations. In terms of validation this model scores a 'hit' when a joke on the list was highly rated by the user. It scores a miss when the reverse is true.
+
+Here we train a recommender for a series of Top-N lists, N = 1,3,5,10,15,20. Using these results we can build a ROC curve of the True Positive vs False Positive rates.
+
+```{r, message = FALSE}
+topn_results <- evaluate(validation_splits, method="UBCF", type = "topNList", n=c(1,3,5,10,15,20))
+
+#look at resutls for cross validation folds
+avg(topn_results)
+
+#Plot a ROC curve
+plot(topn_results, annotate=TRUE)
+```
+
+**Discuss:**
+* How do you rate this model's performance at recommending jokes lists? 
+    - For small values of n?
+    - For large values of n?
+
+#Exercises
+1. Experiment with varying the value of `given` What is the effect of increasing it on performance in both (TopN & rating) cases? Look at the help file, negative values are permitted.
+
+2. Experiment with the different collaborative filtering methods available. Contrast the performance of UBCF with Item-Based Collaborative Filtering. Page 30 of he [recommenderlab vignette](https://cran.r-project.org/web/packages/recommenderlab/vignettes/recommenderlab.pdf) gives a handy way to compare multiple at once in a call to `evaluate()`.
+
+3. What is the best combination of method and parameters? 
+
+#Extension
+The [Book Crossing Dataset](http://www2.informatik.uni-freiburg.de/~cziegler/BX/) is book rating data set that contains some basic demographic information (Age, Location) which can be used to practice construction of a hybrid recommender system that uses content-based recommendation for users with low numbers of recommendations. You can get it as 3 tables in a .csv or an sql database. This would also be a great opportunity to practice some SQL to create the dataset!
+
+
+
